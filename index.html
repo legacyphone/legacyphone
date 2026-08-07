@@ -651,24 +651,30 @@
   // TAXAS PADRÃO
   // =====================================================================
   const taxasPadrao = {
-    "D":3.55,"1":5.55,"2":8.00,"3":9.00,"4":10.00,"5":10.50,
-    "6":11.00,"7":12.00,"8":13.00,"9":13.50,"10":15.00,
-    "11":16.00,"12":16.50,"13":17.50,"14":18.50,"15":19.00,
-    "16":20.00,"17":21.00,"18":21.50
+    "D":3.00,"1":5.00,"2":7.50,"3":8.50,"4":9.50,"5":10.00,
+    "6":10.50,"7":11.50,"8":12.50,"9":13.00,"10":14.50,
+    "11":15.50,"12":16.00,"13":16.00,"14":17.00,"15":17.50,
+    "16":17.50,"17":18.00,"18":18.00
   };
   const PARCELAS_HL = new Set([3, 6, 12, 18]);
 
   // =====================================================================
-  // LOCALSTORAGE — TAXAS
+  // TAXAS — salvas no Supabase (não dependem do navegador/cache)
   // =====================================================================
-  function getTaxas() {
-    try {
-      const p = JSON.parse(localStorage.getItem(LS_KEY) || 'null');
-      if (p) return Object.assign({}, taxasPadrao, p);
-    } catch(e){}
-    return { ...taxasPadrao };
+  let _taxasCache = { ...taxasPadrao };
+  function getTaxas() { return _taxasCache; }
+  async function carregarTaxas() {
+    if (!sbClient) return;
+    const { data, error } = await sbClient.from('configuracoes').select('valor').eq('chave','taxas').maybeSingle();
+    if (!error && data && data.valor) _taxasCache = Object.assign({...taxasPadrao}, data.valor);
+    gerarSimulacao();
   }
-  function setTaxas(t){ try{ localStorage.setItem(LS_KEY, JSON.stringify(t)); }catch(e){} }
+  async function setTaxas(t){
+    _taxasCache = t;
+    if (!sbClient) return { error: 'sem-supabase' };
+    const { error } = await sbClient.from('configuracoes').upsert({ chave:'taxas', valor:t });
+    return { error };
+  }
 
   // =====================================================================
   // LOCALSTORAGE — HISTÓRICO
@@ -1093,20 +1099,26 @@
       d.appendChild(l); d.appendChild(i); c.appendChild(d);
     });
   }
-  function salvarTaxasAdmin() {
-    const t = getTaxas(); let ok = true;
+  async function salvarTaxasAdmin() {
+    const t = { ...getTaxas() }; let ok = true;
     document.querySelectorAll('#admin-taxas input').forEach(inp => {
       const v = parseFloat(inp.value);
       if (isNaN(v)||v<0||v>100) { ok=false; return; }
       t[inp.dataset.chave] = v;
     });
     if (!ok) { mostrarAdminFeedback('error','Valores inválidos. Use números entre 0 e 100.','admin-save-feedback'); return; }
-    setTaxas(t); gerarSimulacao();
-    mostrarAdminFeedback('success','✓ Taxas salvas com sucesso!','admin-save-feedback');
+    const btn = document.querySelector('.admin-actions button:not(.danger)');
+    if (btn) btn.disabled = true;
+    const { error } = await setTaxas(t);
+    if (btn) btn.disabled = false;
+    if (error) { mostrarAdminFeedback('error','Erro ao salvar no banco de dados. Verifique sua internet.','admin-save-feedback'); return; }
+    gerarSimulacao();
+    mostrarAdminFeedback('success','✓ Taxas salvas com sucesso! Já valem pra todos os computadores.','admin-save-feedback');
   }
-  function restaurarTaxasPadrao() {
+  async function restaurarTaxasPadrao() {
     if (!confirm('Deseja restaurar todas as taxas para o padrão? Esta ação não pode ser desfeita.')) return;
-    try { localStorage.removeItem(LS_KEY); } catch(e){}
+    const { error } = await setTaxas({ ...taxasPadrao });
+    if (error) { mostrarAdminFeedback('error','Erro ao restaurar no banco de dados. Verifique sua internet.','admin-save-feedback'); return; }
     preencherAdminFields(); gerarSimulacao();
     mostrarAdminFeedback('success','✓ Taxas restauradas para o padrão.','admin-save-feedback');
   }
@@ -1459,7 +1471,11 @@
     document.getElementById('ap-data-entrada').value=hojeISO();
     onDestinoChange();
     carregarAparelhos();
-    if(sbClient)sbClient.channel('aparelhos-changes').on('postgres_changes',{event:'*',schema:'public',table:'aparelhos'},()=>{carregarAparelhos(false)}).subscribe();
+    carregarTaxas();
+    if(sbClient){
+      sbClient.channel('aparelhos-changes').on('postgres_changes',{event:'*',schema:'public',table:'aparelhos'},()=>{carregarAparelhos(false)}).subscribe();
+      sbClient.channel('configuracoes-changes').on('postgres_changes',{event:'*',schema:'public',table:'configuracoes'},()=>{carregarTaxas()}).subscribe();
+    }
     document.getElementById('ap-hist-modal').addEventListener('click',e=>{if(e.target===document.getElementById('ap-hist-modal'))fecharHistoricoAparelho()});
 
     document.getElementById('modelo').addEventListener('input', () => { atualizarArmazenamentos(); gerarSimulacao(); });
@@ -1497,12 +1513,14 @@
   // =====================================================================
   // GERADOR DE ATALHOS
   // =====================================================================
-  var TAXA_12X = 16.50;
+  var TAXA_12X = 16.00; // usado só se as taxas do banco ainda não carregaram
   var _atalhoItens = [];
   var _atalhoTipo = 'seminovo';
 
   function calc12xValor(valor) {
-    return valor * (1 + TAXA_12X / 100) / 12;
+    const t = getTaxas();
+    const taxa12 = (t && t['12'] !== undefined) ? t['12'] : TAXA_12X;
+    return valor * (1 + taxa12 / 100) / 12;
   }
 
   function fmtValor(v) {
