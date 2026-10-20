@@ -332,6 +332,7 @@
   #tab-bia .mud{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr);gap:6px;padding:6px 0;border-bottom:1px solid var(--line);font-size:14px}
   #tab-bia .mud s{color:var(--muted)}
   #tab-bia .mud.novo{background:#f0fdf4} #tab-bia .mud.saiu{background:#fef2f2} #tab-bia .mud.mudou{background:#fffbeb}
+  #tab-bia .t-todas{background:#e0e7ff;color:#3730a3} #tab-bia .t-loja{background:#fef3c7;color:#92400e}
   .bia-flutuante{position:fixed;right:16px;bottom:16px;z-index:60;display:none;padding:10px 16px;border-radius:999px;border:none;background:#f97316;color:#fff;font-weight:800;box-shadow:0 8px 24px rgba(249,115,22,.4);cursor:pointer;width:auto}
   .bia-flutuante.on{display:block}
 </style>
@@ -744,8 +745,13 @@
       <div class="bia-card">
         <b>Nova regra para a Ana</b>
         <textarea id="bia-nova-regra" rows="2" style="margin:8px 0" placeholder="Ex.: Quando o cliente perguntar de capinha, diga que temos várias cores na loja."></textarea>
-        <button class="bia-bt pri mini" id="bia-add-regra">Adicionar</button>
+        <div class="bia-linha">
+          <button class="bia-bt pri mini" id="bia-add-regra">🌐 Adicionar para todas as lojas</button>
+          <button class="bia-bt mini" id="bia-add-regra-loja">📍 Adicionar só para a Ana</button>
+        </div>
+        <div class="bia-sub" style="margin-top:6px">🌐 vai na hora para as atendentes das outras lojas. 📍 fica só aqui.</div>
       </div>
+      <div class="bia-card" id="bia-cerebro"></div>
       <h3>💡 Sugestões da Ana</h3><div id="bia-sugestoes"></div>
       <h3>✅ Regras que a Ana segue</h3><div id="bia-regras"></div>
     </section>
@@ -755,7 +761,7 @@
         <p class="bia-sub" style="margin:4px 0 8px">Ensine a Ana a responder dúvidas de quem já comprou ou de atendimento em geral. Escreva como a loja responderia: ela usa a ideia com as palavras dela e de forma curta.</p>
         <input id="bia-sac-pergunta" type="text" placeholder="Assunto ou pergunta. Ex.: Como acionar a garantia do seminovo?" style="width:100%;margin-bottom:8px">
         <textarea id="bia-sac-resposta" rows="3" placeholder="Resposta da loja. Ex.: Traga o aparelho na loja com o comprovante da compra. A equipe testa na hora e, se for defeito coberto, resolve dentro da garantia de 6 meses."></textarea>
-        <div class="bia-linha" style="margin-top:8px"><button class="bia-bt pri mini" id="bia-sac-salvar">Adicionar</button><button class="bia-bt mini" id="bia-sac-cancelar" style="display:none">Cancelar</button><span class="bia-sub" id="bia-sac-status"></span></div>
+        <div class="bia-linha" style="margin-top:8px"><button class="bia-bt pri mini" id="bia-sac-salvar">🌐 Adicionar para todas as lojas</button><button class="bia-bt mini" id="bia-sac-salvar-loja">📍 Adicionar só para a Ana</button><button class="bia-bt mini" id="bia-sac-cancelar" style="display:none">Cancelar</button><span class="bia-sub" id="bia-sac-status"></span></div>
       </div>
       <div id="bia-sac-lista"></div>
     </section>
@@ -2071,6 +2077,19 @@
 // =====================================================================
 (function () {
   const EMAIL_EQUIPE = 'equipe@legacyphone.bia';
+  const LOJA_PAINEL = 'legacy-phone';
+  // As regras circulam escritas com o nome "Ana"; aqui aparecem com o nome da atendente desta loja.
+  const ATENDENTE_PAINEL = 'Ana';
+  const comNome = (t) => String(t || '').replace(new RegExp('(?<![\\p{L}])B' + 'ia(?![\\p{L}])', 'gu'), ATENDENTE_PAINEL);
+  // (o "B" + "ia" é de propósito: a instalação troca "Ana" pelo nome da atendente da loja, e aqui não pode)
+  const NOMES_LOJAS = { 'kronos-phone': 'B' + 'ia · Kronos', 'rr-prime-cell': 'Rafa · RR Prime Cell', 'legacy-phone': 'Ana · Legacy Phone' };
+  // Etiqueta do cérebro: vale para todas as lojas ou só para esta.
+  const tagEscopo = (r) => (r.escopo === 'loja'
+    ? el('span', { class: 'bia-tag t-loja' }, '📍 Só para a Ana')
+    : el('span', { class: 'bia-tag t-todas' }, '🌐 Todas as lojas'));
+  const tagOrigem = (r) => (r.loja_origem && r.loja_origem !== LOJA_PAINEL ? el('span', { class: 'bia-tag' }, '🧠 veio da ' + (NOMES_LOJAS[r.loja_origem] || r.loja_origem)) : null);
+  const faltaSql = (e) => (String(e?.message || e).includes('escopo') || String(e?.message || e).includes('excluido')
+    ? 'Rode o SQL do cérebro compartilhado (cerebro.sql) no Supabase desta loja.' : e);
   const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { storageKey: 'legacy-bia-auth' } });
   const $ = (id) => document.getElementById(id);
   const el = (tag, attrs = {}, ...filhos) => {
@@ -2331,35 +2350,75 @@
 
   // ------------------------------------------------------------------ aprendizados
   async function carregarAprendizados() {
-    const { data, error } = await sb.from('bia_aprendizados').select('*').neq('status', 'rejeitado').order('criado_em', { ascending: false });
-    if (error) return erro(error);
+    const { data, error } = await sb.from('bia_aprendizados').select('*').eq('excluido', false).neq('status', 'rejeitado').order('criado_em', { ascending: false });
+    if (error) return erro(faltaSql(error));
     const salvar = async (id, campos) => {
       const { error: e } = await sb.from('bia_aprendizados').update({ ...campos, atualizado_em: new Date().toISOString() }).eq('id', id);
-      if (e) return erro(e);
-      carregarAprendizados();
+      if (e) return erro(faltaSql(e));
+      await carregarAprendizados();
+      if (campos.status !== 'rejeitado') cerebroMudou();
     };
     const sugestoes = data.filter((a) => a.status === 'sugerido');
     const regras = data.filter((a) => a.status === 'ativo');
     $('bia-sugestoes').replaceChildren(...(sugestoes.length ? sugestoes.map((a) => el('div', { class: 'bia-card', style: 'border-color:#c7d2fe' },
-      el('div', {}, a.texto),
+      el('div', {}, comNome(a.texto)),
       a.evidencia ? el('div', { class: 'bia-sub', style: 'margin-top:4px' }, '🔎 ' + a.evidencia) : null,
       el('div', { class: 'bia-linha', style: 'margin-top:8px' },
-        el('button', { class: 'bia-bt pri mini', onclick: () => salvar(a.id, { ativo: true, status: 'ativo' }) }, '✅ Aprovar'),
+        el('button', { class: 'bia-bt pri mini', onclick: () => salvar(a.id, { ativo: true, status: 'ativo', escopo: 'todas' }) }, '✅ Aprovar para todas as lojas'),
+        el('button', { class: 'bia-bt mini', onclick: () => salvar(a.id, { ativo: true, status: 'ativo', escopo: 'loja' }) }, '📍 Aprovar só para a Ana'),
         el('button', { class: 'bia-bt mini', onclick: () => salvar(a.id, { ativo: false, status: 'rejeitado' }) }, 'Rejeitar'))))
       : [el('p', { class: 'bia-sub' }, 'Nenhuma sugestão pendente. A Ana analisa os atendimentos todo dia às 22h.')]));
-    $('bia-regras').replaceChildren(...regras.map((a) => el('div', { class: 'bia-card bia-linha' },
-      el('input', { type: 'checkbox', checked: a.ativo ? '' : false, onchange: (e) => salvar(a.id, { ativo: e.target.checked }) }),
-      el('div', { style: 'flex:1;min-width:200px' }, a.texto, el('div', { class: 'bia-sub' }, a.origem || '')),
-      el('button', { class: 'bia-bt nao mini', onclick: async () => { if (confirm('Apagar esta regra?')) { await sb.from('bia_aprendizados').delete().eq('id', a.id); carregarAprendizados(); } } }, '🗑'))));
+    const todas = regras.filter((a) => a.escopo !== 'loja').length;
+    $('bia-regras').replaceChildren(
+      el('p', { class: 'bia-sub' }, `${regras.length} regras: ${todas} valem para todas as lojas (🌐) e ${regras.length - todas} só para a Ana (📍). Mudança numa regra 🌐 vale em todas as lojas.`),
+      ...regras.map((a) => el('div', { class: 'bia-card bia-linha' },
+        el('input', { type: 'checkbox', checked: a.ativo ? '' : false, title: a.escopo === 'loja' ? 'Liga/desliga só aqui' : 'Liga/desliga em todas as lojas', onchange: (e) => salvar(a.id, { ativo: e.target.checked }) }),
+        el('div', { style: 'flex:1;min-width:200px' }, comNome(a.texto),
+          el('div', { class: 'bia-linha', style: 'margin-top:4px' }, tagEscopo(a), tagOrigem(a), el('span', { class: 'bia-sub' }, a.origem || ''))),
+        el('button', { class: 'bia-bt mini', onclick: () => salvar(a.id, { escopo: a.escopo === 'loja' ? 'todas' : 'loja' }) },
+          a.escopo === 'loja' ? '🌐 Liberar para todas' : '📍 Deixar só para a Ana'),
+        el('button', { class: 'bia-bt nao mini', onclick: () => {
+          if (confirm(a.escopo === 'loja' ? 'Apagar esta regra?' : 'Apagar esta regra em TODAS as lojas?')) salvar(a.id, { excluido: true, ativo: false });
+        } }, '🗑'))));
+    desenharCerebro();
   }
-  $('bia-add-regra').onclick = async () => {
+  // Tempo real: depois de qualquer mudança em regra ou SAC, avisa as outras lojas (sem botão).
+  let cerebroEnviando = false;
+  async function cerebroMudou() {
+    cerebroEnviando = true; desenharCerebro();
+    try { config = { ...config, cerebro_resultado: await chamarServidor('cerebro_avisar') }; }
+    catch (e) { config = { ...config, cerebro_resultado: { erro: 'não consegui avisar as outras lojas agora (' + e.message + '). Elas recebem na próxima hora.' } }; }
+    cerebroEnviando = false; desenharCerebro();
+  }
+  function desenharCerebro() {
+    if (!$('bia-cerebro')) return;
+    const r = config?.cerebro_resultado;
+    const linhas = (r?.lojas || []).map((l) => {
+      const nome = NOMES_LOJAS[l.loja] || l.loja;
+      if (!l.ok) return el('div', {}, `⏳ ${nome}: ainda não instalada ou fora do ar (${l.erro || 'erro'}).`);
+      const ap = l.aprendizados || {}, sac = l.sac || {};
+      const igual = !ap.faltam && !sac.faltam && !ap.so_aqui && !sac.so_aqui;
+      return el('div', {}, `${igual ? '✅' : '🔄'} ${nome}: ${ap.aqui ?? '-'} regras e ${sac.aqui ?? '-'} respostas do SAC compartilhadas` +
+        (igual ? ' (iguais).' : ' (atualizando…).'));
+    });
+    $('bia-cerebro').replaceChildren(
+      el('b', {}, '🧠 Cérebro compartilhado'),
+      el('p', { class: 'bia-sub', style: 'margin:4px 0' }, 'Regras e respostas do SAC 🌐 vão sozinhas, na hora, para as atendentes das outras lojas. As 📍 ficam só aqui.'),
+      cerebroEnviando ? el('div', { class: 'bia-sub' }, '🔄 Enviando para as outras lojas…') : null,
+      ...(r?.lojas ? [...linhas, el('div', { class: 'bia-sub', style: 'margin-top:4px' }, `Conferido em ${quando(r.em)}`)]
+        : [el('div', { class: 'bia-sub' }, r?.erro ? '⚠️ ' + r.erro : 'Ainda não conferido.')]));
+  }
+  async function novaRegra(escopo) {
     const texto = $('bia-nova-regra').value.trim();
     if (!texto) return;
-    const { error } = await sb.from('bia_aprendizados').insert({ id: crypto.randomUUID(), texto, ativo: true, status: 'ativo', origem: 'adicionada no painel' });
-    if (error) return erro(error);
+    const { error } = await sb.from('bia_aprendizados').insert({ id: crypto.randomUUID(), texto, ativo: true, status: 'ativo', origem: 'adicionada no painel', escopo, loja_origem: LOJA_PAINEL });
+    if (error) return erro(faltaSql(error));
     $('bia-nova-regra').value = '';
-    carregarAprendizados();
-  };
+    await carregarAprendizados();
+    cerebroMudou();
+  }
+  $('bia-add-regra').onclick = () => novaRegra('todas');
+  $('bia-add-regra-loja').onclick = () => novaRegra('loja');
 
   // ------------------------------------------------------------------ relatório
   let relAberto = null;
@@ -2433,38 +2492,44 @@
     sacEditando = null;
     $('bia-sac-pergunta').value = ''; $('bia-sac-resposta').value = '';
     $('bia-sac-titulo').textContent = 'Nova resposta do SAC';
-    $('bia-sac-salvar').textContent = 'Adicionar'; $('bia-sac-cancelar').style.display = 'none';
+    $('bia-sac-salvar').textContent = '🌐 Adicionar para todas as lojas'; $('bia-sac-salvar-loja').style.display = ''; $('bia-sac-cancelar').style.display = 'none';
   }
   async function carregarSac() {
-    const { data, error } = await sb.from('bia_sac').select('*').order('criado_em', { ascending: false });
-    if (error) return erro(error.message.includes('does not exist') ? 'Rode a atualização do banco da Ana (SQL) para liberar o SAC.' : error);
+    const { data, error } = await sb.from('bia_sac').select('*').eq('excluido', false).order('criado_em', { ascending: false });
+    if (error) return erro(error.message.includes('does not exist') ? 'Rode a atualização do banco da Ana (SQL) para liberar o SAC.' : faltaSql(error));
     const atualizar = async (id, campos) => {
       const { error: e } = await sb.from('bia_sac').update({ ...campos, atualizado_em: new Date().toISOString() }).eq('id', id);
-      if (e) return erro(e); carregarSac();
+      if (e) return erro(faltaSql(e)); await carregarSac(); cerebroMudou();
     };
     $('bia-sac-lista').replaceChildren(...(data.length ? data.map((q) => el('div', { class: 'bia-card', style: q.ativo ? '' : 'opacity:.55' },
       el('b', {}, q.pergunta), el('div', { style: 'white-space:pre-wrap;margin:6px 0' }, q.resposta),
+      el('div', { class: 'bia-linha', style: 'margin-bottom:6px' }, tagEscopo(q), tagOrigem(q)),
       el('div', { class: 'bia-linha' },
         el('button', { class: 'bia-bt mini', onclick: () => {
           sacEditando = q.id; $('bia-sac-pergunta').value = q.pergunta; $('bia-sac-resposta').value = q.resposta;
-          $('bia-sac-titulo').textContent = 'Editando resposta do SAC'; $('bia-sac-salvar').textContent = 'Salvar alteração';
+          $('bia-sac-titulo').textContent = 'Editando resposta do SAC'; $('bia-sac-salvar').textContent = 'Salvar alteração'; $('bia-sac-salvar-loja').style.display = 'none';
           $('bia-sac-cancelar').style.display = ''; $('bia-sac-pergunta').scrollIntoView({ behavior: 'smooth', block: 'center' });
         } }, '✏️ Editar'),
         el('button', { class: 'bia-bt mini', onclick: () => atualizar(q.id, { ativo: !q.ativo }) }, q.ativo ? '⏸ Pausar' : '▶️ Ativar'),
-        el('button', { class: 'bia-bt nao mini', onclick: async () => { if (confirm('Apagar esta resposta do SAC?')) { await sb.from('bia_sac').delete().eq('id', q.id); carregarSac(); } } }, '🗑')))) :
+        el('button', { class: 'bia-bt mini', onclick: () => atualizar(q.id, { escopo: q.escopo === 'loja' ? 'todas' : 'loja' }) }, q.escopo === 'loja' ? '🌐 Liberar para todas' : '📍 Deixar só para a Ana'),
+        el('button', { class: 'bia-bt nao mini', onclick: () => {
+          if (confirm(q.escopo === 'loja' ? 'Apagar esta resposta do SAC?' : 'Apagar esta resposta do SAC em TODAS as lojas?')) atualizar(q.id, { excluido: true, ativo: false });
+        } }, '🗑')))) :
       [vazio('Nenhuma resposta cadastrada. Comece pelas dúvidas que os clientes mais mandam no pós-venda.')]));
   }
   $('bia-sac-cancelar').onclick = limparSac;
-  $('bia-sac-salvar').onclick = async () => {
+  $('bia-sac-salvar').onclick = () => salvarSac('todas');
+  $('bia-sac-salvar-loja').onclick = () => salvarSac('loja');
+  async function salvarSac(escopo) {
     const pergunta = $('bia-sac-pergunta').value.trim(), resposta = $('bia-sac-resposta').value.trim();
     if (!pergunta || !resposta) { $('bia-sac-status').textContent = 'Preencha a pergunta e a resposta.'; return; }
     const { error } = sacEditando
       ? await sb.from('bia_sac').update({ pergunta, resposta, atualizado_em: new Date().toISOString() }).eq('id', sacEditando)
-      : await sb.from('bia_sac').insert({ id: crypto.randomUUID(), pergunta, resposta, ativo: true });
-    if (error) return erro(error);
+      : await sb.from('bia_sac').insert({ id: crypto.randomUUID(), pergunta, resposta, ativo: true, escopo, loja_origem: LOJA_PAINEL });
+    if (error) return erro(faltaSql(error));
     $('bia-sac-status').textContent = 'Salvo ✓ A Ana já usa na próxima mensagem.';
-    limparSac(); carregarSac();
-  };
+    limparSac(); await carregarSac(); cerebroMudou();
+  }
 
   // ------------------------------------------------------------------ tabelas (preços, troca, assistência, horários)
   const DIAS_TAB = [['segunda', 'Segunda'], ['terca', 'Terça'], ['quarta', 'Quarta'], ['quinta', 'Quinta'], ['sexta', 'Sexta'],
