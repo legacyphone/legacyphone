@@ -752,6 +752,13 @@
         <div class="bia-sub" style="margin-top:6px">🌐 vai na hora para as atendentes das outras lojas. 📍 fica só aqui.</div>
       </div>
       <div class="bia-card" id="bia-cerebro"></div>
+      <div class="bia-card">
+        <div class="bia-linha">
+          <input id="bia-regras-busca" type="search" placeholder="🔎 Pesquisar nas regras (palavra ou frase)" style="flex:1;min-width:200px">
+          <button class="bia-bt mini" id="bia-repetidas">🧹 Procurar regras repetidas</button>
+        </div>
+        <div id="bia-repetidas-res"></div>
+      </div>
       <h3>💡 Sugestões da Ana</h3><div id="bia-sugestoes"></div>
       <h3>✅ Regras que a Ana segue</h3><div id="bia-regras"></div>
     </section>
@@ -2307,7 +2314,15 @@
         c.status === 'equipe' && c.pausada_ate ? el('div', { class: 'bia-sub', style: 'margin-top:6px;background:var(--card-soft);padding:8px;border-radius:10px' }, `👩‍💼 A equipe está atendendo. A Ana volta sozinha em ${quando(c.pausada_ate)} se ninguém responder.`) : null,
         el('div', { class: 'bia-linha', style: 'margin-top:10px' },
           c.status === 'equipe'
-            ? el('button', { class: 'bia-bt pri mini', onclick: () => atualizar({ status: 'bia', pausada_ate: null }) }, '🤖 Devolver para a Ana')
+            ? el('button', { class: 'bia-bt pri mini', onclick: async (ev) => {
+              // A Ana volta e já responde o que o cliente mandou (com todo o contexto da conversa).
+              ev.target.disabled = true; ev.target.textContent = '⏳ A Ana está respondendo…';
+              try {
+                const r = await chamarServidor('devolver', { id });
+                if (!r.ok) throw new Error(r.erro || 'não deu');
+              } catch (e) { await atualizar({ status: 'bia', pausada_ate: null }); alert('Devolvi para a Ana, mas ela não conseguiu responder agora (' + e.message + '). Ela tenta de novo sozinha em instantes.'); }
+              carregarConversas(); abrirConversa(id);
+            } }, '🤖 Devolver para a Ana')
             : el('button', { class: 'bia-bt mini', onclick: () => atualizar({ status: 'equipe', pausada_ate: new Date(Date.now() + (config?.pausa_horas || 12) * 3600e3).toISOString() }) }, '👩‍💼 Assumir (pausar a Ana)'),
           el('button', { class: 'bia-bt ok mini', onclick: () => atualizar({ resultado: 'comprou' }) }, '💰 Comprou'),
           el('button', { class: 'bia-bt nao mini', onclick: () => atualizar({ resultado: 'perdido' }) }, 'Perdido'),
@@ -2372,24 +2387,29 @@
       await carregarAprendizados();
       if (campos.status !== 'rejeitado') cerebroMudou();
     };
-    const sugestoes = data.filter((a) => a.status === 'sugerido');
-    const regras = data.filter((a) => a.status === 'ativo');
+    const busca = semAcento($('bia-regras-busca').value.trim());
+    const acha = (a) => !busca || semAcento(comNome(a.texto)).includes(busca);
+    const sugestoes = data.filter((a) => a.status === 'sugerido' && acha(a));
+    const todasRegras = data.filter((a) => a.status === 'ativo');
+    const regras = todasRegras.filter(acha);
     $('bia-sugestoes').replaceChildren(...(sugestoes.length ? sugestoes.map((a) => sugEditando === a.id
       ? el('div', { class: 'bia-card', style: 'border-color:#c7d2fe' }, caixaEdicao(comNome(a.texto),
         async (texto) => { sugEditando = null; await decidirSugestao(a.id, { texto }); carregarAprendizados(); },
         () => { sugEditando = null; carregarAprendizados(); }))
       : el('div', { class: 'bia-card', style: 'border-color:#c7d2fe' },
-      el('div', {}, comNome(a.texto)),
+      el('div', {}, destacar(comNome(a.texto), busca)),
       a.evidencia ? el('div', { class: 'bia-sub', style: 'margin-top:4px' }, '🔎 ' + a.evidencia) : null,
       el('div', { class: 'bia-linha', style: 'margin-top:8px' },
         el('button', { class: 'bia-bt pri mini', onclick: async () => { await salvar(a.id, { ativo: true, status: 'ativo', escopo: 'todas' }); gerarExemplo(a.id, comNome(a.texto)); } }, '✅ Aprovar para todas as lojas'),
         el('button', { class: 'bia-bt mini', onclick: async () => { await salvar(a.id, { ativo: true, status: 'ativo', escopo: 'loja' }); gerarExemplo(a.id, comNome(a.texto)); } }, '📍 Aprovar só para a Ana'),
         el('button', { class: 'bia-bt mini', onclick: () => { sugEditando = a.id; carregarAprendizados(); } }, '✏️ Editar'),
         el('button', { class: 'bia-bt mini', onclick: () => salvar(a.id, { ativo: false, status: 'rejeitado' }) }, 'Rejeitar'))))
-      : [el('p', { class: 'bia-sub' }, 'Nenhuma sugestão pendente. A Ana analisa os atendimentos todo dia às 22h.')]));
+      : [el('p', { class: 'bia-sub' }, busca ? 'Nenhuma sugestão com essa palavra.' : 'Nenhuma sugestão pendente. A Ana analisa os atendimentos todo dia às 22h.')]));
     const todas = regras.filter((a) => a.escopo !== 'loja').length;
     $('bia-regras').replaceChildren(
-      el('p', { class: 'bia-sub' }, `${regras.length} regras: ${todas} valem para todas as lojas (🌐) e ${regras.length - todas} só para a Ana (📍). Mudança numa regra 🌐 vale em todas as lojas.`),
+      busca
+        ? el('p', { class: 'bia-sub' }, regras.length ? `🔎 ${regras.length} de ${todasRegras.length} regras têm “${$('bia-regras-busca').value.trim()}”.` : `🔎 Nenhuma regra tem “${$('bia-regras-busca').value.trim()}”.`)
+        : el('p', { class: 'bia-sub' }, `${regras.length} regras: ${todas} valem para todas as lojas (🌐) e ${regras.length - todas} só para a Ana (📍). Mudança numa regra 🌐 vale em todas as lojas.`),
       ...regras.map((a) => regraEditando === a.id
         ? el('div', { class: 'bia-card' },
           el('textarea', { id: 'bia-editar-regra', rows: 4, style: 'width:100%;box-sizing:border-box' }, comNome(a.texto)),
@@ -2406,7 +2426,7 @@
         : el('div', { class: 'bia-card' },
           el('div', { class: 'bia-linha' },
             el('input', { type: 'checkbox', checked: a.ativo ? '' : false, title: a.escopo === 'loja' ? 'Liga/desliga só aqui' : 'Liga/desliga em todas as lojas', onchange: (e) => salvar(a.id, { ativo: e.target.checked }) }),
-            el('div', { style: 'flex:1;min-width:200px' }, comNome(a.texto),
+            el('div', { style: 'flex:1;min-width:200px' }, destacar(comNome(a.texto), busca),
               el('div', { class: 'bia-linha', style: 'margin-top:4px' }, tagEscopo(a), tagOrigem(a), el('span', { class: 'bia-sub' }, a.origem || ''))),
             el('button', { class: 'bia-bt mini', onclick: () => { regraEditando = a.id; carregarAprendizados(); } }, '✏️ Editar'),
             el('button', { class: 'bia-bt mini', onclick: () => salvar(a.id, { escopo: a.escopo === 'loja' ? 'todas' : 'loja' }) },
@@ -2417,6 +2437,52 @@
           exemploEl(a))));
     desenharCerebro();
   }
+  // Pesquisa nas regras: sem diferença de acento e maiúscula; o trecho achado fica marcado.
+  const semAcento = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  function destacar(texto, busca) {
+    if (!busca) return texto;
+    const i = semAcento(texto).indexOf(busca);
+    if (i < 0) return texto;
+    return el('span', {}, texto.slice(0, i), el('mark', {}, texto.slice(i, i + busca.length)), texto.slice(i + busca.length));
+  }
+  let buscaTimer = null;
+  $('bia-regras-busca').oninput = () => { clearTimeout(buscaTimer); buscaTimer = setTimeout(carregarAprendizados, 250); };
+
+  // Regras repetidas: a Ana revisa todas e mostra os grupos; o dono escolhe qual excluir.
+  let repetidas = null;
+  const TIPOS_REPETIDAS = { repetida: '🔁 Dizem a mesma coisa', parecida: '🪞 Muito parecidas', contraditoria: '⚔️ Se contradizem' };
+  $('bia-repetidas').onclick = async (ev) => {
+    ev.target.disabled = true; ev.target.textContent = '⏳ Analisando todas as regras…';
+    $('bia-repetidas-res').replaceChildren(el('p', { class: 'bia-sub' }, 'A Ana está lendo todas as regras e comparando uma com a outra. Pode levar até 1 minuto.'));
+    try { repetidas = { ...(await chamarServidor('regras_repetidas')), ignorados: new Set(), excluidas: new Set() }; }
+    catch (e) { repetidas = null; $('bia-repetidas-res').replaceChildren(vazio('Não consegui analisar agora: ' + e.message)); }
+    ev.target.disabled = false; ev.target.textContent = '🧹 Procurar regras repetidas';
+    if (repetidas) desenharRepetidas();
+  };
+  function desenharRepetidas() {
+    const r = repetidas;
+    const abertos = r.grupos.map((g, i) => ({ ...g, i, regras: g.regras.filter((x) => !r.excluidas.has(x.id)) }))
+      .filter((g) => !r.ignorados.has(g.i) && g.regras.length >= 2);
+    const excluir = async (x) => {
+      if (!confirm((x.escopo === 'loja' ? 'Excluir esta regra?' : 'Excluir esta regra em TODAS as lojas?') + '\n\n' + x.texto)) return;
+      const { error } = await sb.from('bia_aprendizados').update({ excluido: true, ativo: false, atualizado_em: new Date().toISOString() }).eq('id', x.id);
+      if (error) return erro(faltaSql(error));
+      r.excluidas.add(x.id);
+      desenharRepetidas(); carregarAprendizados(); cerebroMudou();
+    };
+    $('bia-repetidas-res').replaceChildren(
+      el('p', { class: 'bia-sub', style: 'margin:10px 0 4px' }, abertos.length
+        ? `A Ana revisou ${r.total} regras e achou ${abertos.length} ${abertos.length === 1 ? 'grupo' : 'grupos'} para você conferir. Exclua a que sobra (⭐ = a que ela manteria).`
+        : `✅ A Ana revisou ${r.total} regras e não há mais repetidas, parecidas ou contraditórias.`),
+      ...abertos.map((g) => el('div', { class: 'bia-card', style: 'border-color:#fcd34d;margin-top:8px' },
+        el('b', {}, TIPOS_REPETIDAS[g.tipo] || g.tipo), el('div', { class: 'bia-sub', style: 'margin:2px 0 6px' }, g.motivo),
+        ...g.regras.map((x) => el('div', { class: 'bia-linha', style: 'padding:8px 0;border-top:1px solid var(--line)' },
+          el('div', { style: 'flex:1;min-width:200px' }, x.manter ? el('b', {}, '⭐ ') : null, comNome(x.texto),
+            el('div', { style: 'margin-top:4px' }, tagEscopo(x))),
+          el('button', { class: 'bia-bt nao mini', onclick: () => excluir(x) }, '🗑 Excluir'))),
+        el('div', { style: 'margin-top:6px' }, el('button', { class: 'bia-bt mini', onclick: () => { r.ignorados.add(g.i); desenharRepetidas(); } }, 'Manter todas')))));
+  }
+
   // Exemplo de como a Ana aplicaria cada regra (gerado sozinho ao criar ou editar).
   let regraEditando = null, sugEditando = null;
   // Caixa para editar o texto de uma regra ou sugestão (Salvar / Cancelar).
@@ -2473,7 +2539,7 @@
     $('bia-cerebro').replaceChildren(
       el('b', {}, '🧠 Cérebro compartilhado'),
       el('p', { class: 'bia-sub', style: 'margin:4px 0' }, 'Regras e respostas do SAC 🌐 vão sozinhas, na hora, para as atendentes das outras lojas. As 📍 ficam só aqui.'),
-      cerebroEnviando ? el('div', { class: 'bia-sub' }, '🔄 Enviando para as outras lojas…') : null,
+      ...(cerebroEnviando ? [el('div', { class: 'bia-sub' }, '🔄 Enviando para as outras lojas…')] : []),
       ...(r?.lojas ? [...linhas, el('div', { class: 'bia-sub', style: 'margin-top:4px' }, `Conferido em ${quando(r.em)}`)]
         : [el('div', { class: 'bia-sub' }, r?.erro ? '⚠️ ' + r.erro : 'Ainda não conferido.')]));
   }
