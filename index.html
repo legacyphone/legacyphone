@@ -790,14 +790,27 @@
       </div>
     </section>
     <section data-secao="relatorio" style="display:none">
-      <div class="bia-linha" style="margin-bottom:12px">
-        <b style="flex:1;font-size:17px">Por que os clientes não agendaram?</b>
-        <select id="bia-rel-dias" class="bia-sel"><option value="1">Últimas 24 horas</option><option value="7" selected>Últimos 7 dias</option><option value="15">Últimos 15 dias</option><option value="30">Últimos 30 dias</option><option value="90">Últimos 90 dias</option></select>
+      <div class="bia-card">
+        <b style="font-size:17px">Por que os clientes não agendaram?</b>
+        <div class="bia-linha" style="margin-top:8px">
+          <label class="bia-linha">De <input type="date" id="bia-rel-de" class="bia-sel"></label>
+          <label class="bia-linha">até <input type="date" id="bia-rel-ate" class="bia-sel"></label>
+          <button class="bia-bt pri mini" id="bia-rel-ver">Ver</button>
+        </div>
+        <div class="bia-linha" style="margin-top:6px">
+          <button class="bia-bt mini" data-rel="hoje">Hoje</button><button class="bia-bt mini" data-rel="7">7 dias</button>
+          <button class="bia-bt mini" data-rel="30">30 dias</button><button class="bia-bt mini" data-rel="mes">Este mês</button>
+          <button class="bia-bt mini" data-rel="mes-passado">Mês passado</button>
+        </div>
+        <div class="bia-sub" id="bia-rel-progresso" style="margin-top:8px"></div>
       </div>
       <div class="bia-num" id="bia-rel-geral" style="margin-bottom:12px"></div>
       <div class="bia-cards" id="bia-rel-cards"></div>
       <div id="bia-rel-lista"></div>
       <p class="bia-sub" id="bia-rel-nota"></p>
+      <h3 style="margin-top:22px">🎯 Clientes para recuperar</h3>
+      <p class="bia-sub" style="margin-top:-6px">Quem não agendou, dos mais quentes para os mais frios, com o que fazer e uma mensagem pronta. Toque no nome para abrir a conversa.</p>
+      <div id="bia-rel-recuperar"></div>
       <h3 style="margin-top:22px">🧠 Análise da semana (IA)</h3>
       <div class="bia-linha" style="margin-bottom:12px"><button class="bia-bt mini" id="bia-analisar">Analisar agora</button><span class="bia-sub" id="bia-status-analise"></span></div>
       <div id="bia-relatorio"></div>
@@ -2287,6 +2300,7 @@
         lead.resumo ? el('p', { style: 'margin:8px 0' }, lead.resumo) : null,
         lead.interesse ? el('div', {}, '🎯 ', el('b', {}, 'Quer: '), lead.interesse) : null,
         lead.proximo_passo ? el('div', {}, '➡️ ', el('b', {}, 'Próximo passo: '), lead.proximo_passo) : null,
+        lead.dica_recuperacao ? el('div', { style: 'margin-top:4px;padding:8px 10px;border-radius:10px;background:#f0fdf4;white-space:pre-wrap' }, '💡 ', el('b', {}, 'Como recuperar: '), lead.dica_recuperacao) : null,
         lead.sinais?.length ? el('div', {}, '✅ ', el('b', {}, 'Sinais: '), lead.sinais.join('; ')) : null,
         lead.objecoes?.length ? el('div', {}, '⚠️ ', el('b', {}, 'Objeções: '), lead.objecoes.join('; ')) : null,
         ...(ags || []).map((a) => el('div', {}, '📅 ', el('b', {}, 'Agendado: '), `${dataBR(a.data)} às ${a.horario}${a.resultado ? ` (${a.resultado.replace('_', ' ')})` : ''}`)),
@@ -2360,27 +2374,82 @@
     };
     const sugestoes = data.filter((a) => a.status === 'sugerido');
     const regras = data.filter((a) => a.status === 'ativo');
-    $('bia-sugestoes').replaceChildren(...(sugestoes.length ? sugestoes.map((a) => el('div', { class: 'bia-card', style: 'border-color:#c7d2fe' },
+    $('bia-sugestoes').replaceChildren(...(sugestoes.length ? sugestoes.map((a) => sugEditando === a.id
+      ? el('div', { class: 'bia-card', style: 'border-color:#c7d2fe' }, caixaEdicao(comNome(a.texto),
+        async (texto) => { sugEditando = null; await decidirSugestao(a.id, { texto }); carregarAprendizados(); },
+        () => { sugEditando = null; carregarAprendizados(); }))
+      : el('div', { class: 'bia-card', style: 'border-color:#c7d2fe' },
       el('div', {}, comNome(a.texto)),
       a.evidencia ? el('div', { class: 'bia-sub', style: 'margin-top:4px' }, '🔎 ' + a.evidencia) : null,
       el('div', { class: 'bia-linha', style: 'margin-top:8px' },
-        el('button', { class: 'bia-bt pri mini', onclick: () => salvar(a.id, { ativo: true, status: 'ativo', escopo: 'todas' }) }, '✅ Aprovar para todas as lojas'),
-        el('button', { class: 'bia-bt mini', onclick: () => salvar(a.id, { ativo: true, status: 'ativo', escopo: 'loja' }) }, '📍 Aprovar só para a Ana'),
+        el('button', { class: 'bia-bt pri mini', onclick: async () => { await salvar(a.id, { ativo: true, status: 'ativo', escopo: 'todas' }); gerarExemplo(a.id, comNome(a.texto)); } }, '✅ Aprovar para todas as lojas'),
+        el('button', { class: 'bia-bt mini', onclick: async () => { await salvar(a.id, { ativo: true, status: 'ativo', escopo: 'loja' }); gerarExemplo(a.id, comNome(a.texto)); } }, '📍 Aprovar só para a Ana'),
+        el('button', { class: 'bia-bt mini', onclick: () => { sugEditando = a.id; carregarAprendizados(); } }, '✏️ Editar'),
         el('button', { class: 'bia-bt mini', onclick: () => salvar(a.id, { ativo: false, status: 'rejeitado' }) }, 'Rejeitar'))))
       : [el('p', { class: 'bia-sub' }, 'Nenhuma sugestão pendente. A Ana analisa os atendimentos todo dia às 22h.')]));
     const todas = regras.filter((a) => a.escopo !== 'loja').length;
     $('bia-regras').replaceChildren(
       el('p', { class: 'bia-sub' }, `${regras.length} regras: ${todas} valem para todas as lojas (🌐) e ${regras.length - todas} só para a Ana (📍). Mudança numa regra 🌐 vale em todas as lojas.`),
-      ...regras.map((a) => el('div', { class: 'bia-card bia-linha' },
-        el('input', { type: 'checkbox', checked: a.ativo ? '' : false, title: a.escopo === 'loja' ? 'Liga/desliga só aqui' : 'Liga/desliga em todas as lojas', onchange: (e) => salvar(a.id, { ativo: e.target.checked }) }),
-        el('div', { style: 'flex:1;min-width:200px' }, comNome(a.texto),
-          el('div', { class: 'bia-linha', style: 'margin-top:4px' }, tagEscopo(a), tagOrigem(a), el('span', { class: 'bia-sub' }, a.origem || ''))),
-        el('button', { class: 'bia-bt mini', onclick: () => salvar(a.id, { escopo: a.escopo === 'loja' ? 'todas' : 'loja' }) },
-          a.escopo === 'loja' ? '🌐 Liberar para todas' : '📍 Deixar só para a Ana'),
-        el('button', { class: 'bia-bt nao mini', onclick: () => {
-          if (confirm(a.escopo === 'loja' ? 'Apagar esta regra?' : 'Apagar esta regra em TODAS as lojas?')) salvar(a.id, { excluido: true, ativo: false });
-        } }, '🗑'))));
+      ...regras.map((a) => regraEditando === a.id
+        ? el('div', { class: 'bia-card' },
+          el('textarea', { id: 'bia-editar-regra', rows: 4, style: 'width:100%;box-sizing:border-box' }, comNome(a.texto)),
+          el('div', { class: 'bia-linha', style: 'margin-top:6px' },
+            el('button', { class: 'bia-bt pri mini', onclick: async () => {
+              const texto = $('bia-editar-regra').value.trim();
+              if (!texto) return;
+              regraEditando = null;
+              await salvar(a.id, { texto });
+              gerarExemplo(a.id, texto);
+            } }, '💾 Salvar'),
+            el('button', { class: 'bia-bt mini', onclick: () => { regraEditando = null; carregarAprendizados(); } }, 'Cancelar'),
+            el('span', { class: 'bia-sub' }, a.escopo === 'loja' ? 'Muda só aqui.' : 'Muda em todas as lojas.')))
+        : el('div', { class: 'bia-card' },
+          el('div', { class: 'bia-linha' },
+            el('input', { type: 'checkbox', checked: a.ativo ? '' : false, title: a.escopo === 'loja' ? 'Liga/desliga só aqui' : 'Liga/desliga em todas as lojas', onchange: (e) => salvar(a.id, { ativo: e.target.checked }) }),
+            el('div', { style: 'flex:1;min-width:200px' }, comNome(a.texto),
+              el('div', { class: 'bia-linha', style: 'margin-top:4px' }, tagEscopo(a), tagOrigem(a), el('span', { class: 'bia-sub' }, a.origem || ''))),
+            el('button', { class: 'bia-bt mini', onclick: () => { regraEditando = a.id; carregarAprendizados(); } }, '✏️ Editar'),
+            el('button', { class: 'bia-bt mini', onclick: () => salvar(a.id, { escopo: a.escopo === 'loja' ? 'todas' : 'loja' }) },
+              a.escopo === 'loja' ? '🌐 Liberar para todas' : '📍 Deixar só para a Ana'),
+            el('button', { class: 'bia-bt nao mini', onclick: () => {
+              if (confirm(a.escopo === 'loja' ? 'Apagar esta regra?' : 'Apagar esta regra em TODAS as lojas?')) salvar(a.id, { excluido: true, ativo: false });
+            } }, '🗑')),
+          exemploEl(a))));
     desenharCerebro();
+  }
+  // Exemplo de como a Ana aplicaria cada regra (gerado sozinho ao criar ou editar).
+  let regraEditando = null, sugEditando = null;
+  // Caixa para editar o texto de uma regra ou sugestão (Salvar / Cancelar).
+  function caixaEdicao(texto, aoSalvar, aoCancelar) {
+    const caixa = el('textarea', { rows: 4, class: 'bia-editar-texto', style: 'width:100%;box-sizing:border-box' }, texto);
+    return el('div', {}, caixa, el('div', { class: 'bia-linha', style: 'margin-top:6px' },
+      el('button', { class: 'bia-bt pri mini', onclick: () => { const t = caixa.value.trim(); if (t) aoSalvar(t); } }, '💾 Salvar'),
+      el('button', { class: 'bia-bt mini', onclick: aoCancelar }, 'Cancelar')));
+  }
+  // Aprovar, rejeitar ou editar uma sugestão (da aba de regras ou de um card do relatório).
+  async function decidirSugestao(id, campos) {
+    const { error } = await sb.from('bia_aprendizados').update({ ...campos, atualizado_em: new Date().toISOString() }).eq('id', id);
+    if (error) { erro(faltaSql(error)); return false; }
+    if (campos.status === 'ativo') cerebroMudou();
+    return true;
+  }
+  const gerandoExemplo = new Set(), exemplosNovos = new Map();
+  function exemploEl(a) {
+    const ex = exemplosNovos.get(a.id) || a.exemplo;
+    const botao = el('button', { class: 'bia-bt mini', disabled: gerandoExemplo.has(a.id) ? '' : false, onclick: () => gerarExemplo(a.id, comNome(a.texto)) },
+      gerandoExemplo.has(a.id) ? '⏳ Gerando exemplo…' : ex ? '🔄 Novo exemplo' : '💬 Ver exemplo');
+    if (!ex?.dialogo?.length) return el('div', { style: 'margin-top:6px' }, botao);
+    return el('div', { style: 'margin-top:8px;padding:8px;border-radius:8px;background:rgba(99,102,241,.07)' },
+      el('b', {}, '💬 Como a Ana aplicaria:'),
+      ...ex.dialogo.map((f) => el('div', { style: 'margin-top:4px' }, el('b', {}, f.quem === 'cliente' ? 'Cliente: ' : 'Ana: '), f.texto)),
+      ex.explicacao ? el('div', { class: 'bia-sub', style: 'margin-top:4px' }, '🧩 ' + ex.explicacao) : null,
+      el('div', { style: 'margin-top:6px' }, botao));
+  }
+  async function gerarExemplo(id, texto) {
+    gerandoExemplo.add(id); carregarAprendizados();
+    try { exemplosNovos.set(id, (await chamarServidor('exemplo_regra', { id, texto })).exemplo); }
+    catch (e) { alert('Não consegui gerar o exemplo agora: ' + e.message); }
+    gerandoExemplo.delete(id); carregarAprendizados();
   }
   // Tempo real: depois de qualquer mudança em regra ou SAC, avisa as outras lojas (sem botão).
   let cerebroEnviando = false;
@@ -2411,48 +2480,128 @@
   async function novaRegra(escopo) {
     const texto = $('bia-nova-regra').value.trim();
     if (!texto) return;
-    const { error } = await sb.from('bia_aprendizados').insert({ id: crypto.randomUUID(), texto, ativo: true, status: 'ativo', origem: 'adicionada no painel', escopo, loja_origem: LOJA_PAINEL });
+    const id = crypto.randomUUID();
+    const { error } = await sb.from('bia_aprendizados').insert({ id, texto, ativo: true, status: 'ativo', origem: 'adicionada no painel', escopo, loja_origem: LOJA_PAINEL });
     if (error) return erro(faltaSql(error));
     $('bia-nova-regra').value = '';
     await carregarAprendizados();
     cerebroMudou();
+    gerarExemplo(id, texto);
   }
   $('bia-add-regra').onclick = () => novaRegra('todas');
   $('bia-add-regra-loja').onclick = () => novaRegra('loja');
 
   // ------------------------------------------------------------------ relatório
   let relAberto = null;
+  // Período: datas no formato AAAA-MM-DD (horário de Brasília).
+  const diaISO = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  function definirPeriodo(tipo) {
+    const hoje = new Date(); let de = new Date(hoje), ate = new Date(hoje);
+    if (tipo === '7') de.setDate(hoje.getDate() - 6);
+    if (tipo === '30') de.setDate(hoje.getDate() - 29);
+    if (tipo === 'mes') de = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+    if (tipo === 'mes-passado') { de = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1); ate = new Date(hoje.getFullYear(), hoje.getMonth(), 0); }
+    $('bia-rel-de').value = diaISO(de); $('bia-rel-ate').value = diaISO(ate);
+  }
+  document.querySelectorAll('[data-rel]').forEach((b) => { b.onclick = () => { definirPeriodo(b.dataset.rel); carregarRelatorio(); }; });
+  $('bia-rel-ver').onclick = () => carregarRelatorio();
+  const dicaEl = (x) => (x.dica ? el('div', { style: 'margin-top:4px;padding:8px 10px;border-radius:10px;background:#f0fdf4;font-size:14px;white-space:pre-wrap' }, '💡 ' + x.dica) : null);
+  const clienteEl = (x) => el('div', { style: 'padding:10px 0;border-top:1px solid var(--line)' },
+    el('div', { class: 'bia-linha bia-item', onclick: () => abrirConversa(x.id) }, el('b', {}, x.nome), tagTemp({ temperatura: x.temperatura }),
+      x.interesse ? el('span', { class: 'bia-sub' }, '🎯 ' + x.interesse) : null, el('span', { class: 'bia-sub', style: 'margin-left:auto' }, quando(x.quando))),
+    x.resumo ? el('div', { class: 'bia-sub' }, x.resumo) : null, dicaEl(x));
+
+  let relAnalisando = false;
   async function carregarRelatorio() {
     carregarAnalise();
+    if (!$('bia-rel-de').value) definirPeriodo('30');
+    const periodo = { de: $('bia-rel-de').value, ate: $('bia-rel-ate').value };
     $('bia-rel-cards').replaceChildren(el('div', { class: 'bia-sub' }, 'Carregando…'));
     let r;
-    try { r = await chamarServidor('relatorio', { dias: Number($('bia-rel-dias').value) }); }
+    try { r = await chamarServidor('relatorio', periodo); }
     catch (e) { $('bia-rel-cards').replaceChildren(vazio('Não consegui carregar o relatório: ' + e.message)); return; }
     const num = (rot, v) => el('div', { class: 'bia-card' }, el('b', {}, v ?? '-'), el('span', { class: 'bia-sub' }, rot));
     const pct = (n) => (r.conversas ? Math.round((n / r.conversas) * 100) : 0);
-    $('bia-rel-geral').replaceChildren(num('conversas novas', r.conversas), num(`agendaram (${pct(r.agendaram)}%)`, r.agendaram),
-      num('vieram na loja', r.compareceram), num('compraram', r.compraram));
+    $('bia-rel-geral').replaceChildren(num('conversas no período', r.conversas), num(`analisadas (${pct(r.analisadas)}%)`, r.analisadas),
+      num(`agendaram (${pct(r.agendaram)}%)`, r.agendaram), num('vieram na loja', r.compareceram), num('compraram', r.compraram));
     const lista = (c) => {
       relAberto = relAberto === c.id ? null : c.id;
       document.querySelectorAll('#bia-rel-cards .bia-card').forEach((x) => x.classList.toggle('aberta', x.dataset.id === relAberto));
       if (!relAberto) { $('bia-rel-lista').replaceChildren(); return; }
-      $('bia-rel-lista').replaceChildren(el('div', { class: 'bia-card' }, el('b', {}, `${c.emoji} ${c.titulo}`),
-        ...(c.clientes.length ? c.clientes.map((x) => el('div', { class: 'bia-linha bia-item', style: 'padding:8px 0;border-top:1px solid var(--line)', onclick: () => abrirConversa(x.id) },
-          el('b', { style: 'min-width:140px' }, x.nome), el('span', { class: 'bia-sub', style: 'flex:1' }, x.resumo || ''), el('span', { class: 'bia-sub' }, quando(x.quando))))
-          : [el('p', { class: 'bia-sub' }, 'Nenhum cliente neste período.')])));
+      $('bia-rel-lista').replaceChildren(el('div', { class: 'bia-card' }, el('b', {}, `${c.emoji} ${c.titulo} (${c.total})`),
+        ...(c.clientes.length ? c.clientes.map(clienteEl) : [el('p', { class: 'bia-sub' }, 'Nenhum cliente neste período.')])));
     };
     $('bia-rel-cards').replaceChildren(...r.cards.map((c) => el('div', { class: 'bia-card' + (relAberto === c.id ? ' aberta' : ''), 'data-id': c.id, onclick: () => lista(c) },
       el('span', { class: 'emo' }, c.emoji), el('div', { class: 'grande' }, c.total),
       el('div', { style: 'font-weight:700;margin-top:4px' }, c.titulo),
       el('div', { class: 'bia-sub' }, `${pct(c.total)}% das conversas · toque para ver quem`),
-      el('div', { class: 'bia-barra' }, el('i', { style: `width:${pct(c.total)}%` })))));
+      el('div', { class: 'bia-barra' }, el('i', { style: `width:${pct(c.total)}%` })),
+      solucaoEl(c, periodo))));
     const aberto = r.cards.find((c) => c.id === relAberto);
     if (aberto) { relAberto = null; lista(aberto); }
+    $('bia-rel-recuperar').replaceChildren(...(r.recuperar?.length
+      ? [el('div', { class: 'bia-card' }, ...r.recuperar.map(clienteEl))]
+      : [el('p', { class: 'bia-sub' }, 'Nenhum cliente para recuperar neste período.')]));
     const faltam = r.conversas - r.analisadas;
-    $('bia-rel-nota').textContent = `A Ana analisa cada conversa 12 horas depois da última mensagem (inclusive as que a equipe atendeu).` +
-      (faltam > 0 ? ` ${faltam} conversa(s) do período ainda não foram analisadas.` : '');
+    $('bia-rel-nota').textContent = faltam > 0 ? '' : `✅ Todas as ${r.conversas} conversas do período foram analisadas.`;
+    if (faltam > 0 && !relAnalisando) analisarTudo(periodo, r.conversas);
+    // Com tudo analisado, a IA propõe uma solução para cada card que ainda não tem (uma vez por período).
+    const chave = periodo.de + '|' + periodo.ate;
+    if (!faltam && !relSugerindo && !relSugerido.has(chave) && r.cards.some((c) => c.total > 0 && !c.sugestao)) {
+      relSugerido.add(chave); sugerirSolucoes(periodo);
+    }
   }
-  $('bia-rel-dias').onchange = carregarRelatorio;
+  // Solução sugerida para o problema do card: aprovar (vira regra), editar, rejeitar ou pedir outra.
+  let relSugerindo = false, cardEditando = null;
+  const relSugerido = new Set();
+  async function sugerirSolucoes(periodo, card) {
+    relSugerindo = card || true;
+    $('bia-rel-progresso').textContent = '💡 Pensando em como resolver cada problema…';
+    if (card) carregarRelatorio();
+    try { await chamarServidor('sugerir_cards', { ...periodo, card }); $('bia-rel-progresso').textContent = ''; }
+    catch (e) { $('bia-rel-progresso').textContent = '⚠️ Não consegui sugerir agora: ' + e.message; }
+    relSugerindo = false;
+    carregarRelatorio();
+  }
+  function solucaoEl(c, periodo) {
+    const s = c.sugestao;
+    const caixa = (...filhos) => el('div', { style: 'margin-top:10px;padding:10px;border-radius:10px;background:#fefce8;cursor:default;font-size:14px', onclick: (e) => e.stopPropagation() }, ...filhos);
+    const outra = el('button', { class: 'bia-bt mini', onclick: () => sugerirSolucoes(periodo, c.id) }, s ? '🔄 Sugerir outra' : '💡 Sugerir solução');
+    const decidir = async (campos) => {
+      if (await decidirSugestao(s.id, campos) && campos.status === 'ativo') gerarExemplo(s.id, comNome(campos.texto || s.texto));
+      carregarRelatorio(); carregarAprendizados();
+    };
+    if (relSugerindo === c.id || (relSugerindo === true && !s && c.total)) return caixa(el('div', { class: 'bia-sub' }, '💡 Pensando numa solução…'));
+    if (!c.total && !s) return null;
+    if (!s) return caixa(outra);
+    if (s.status === 'ativo') return caixa(el('div', {}, el('b', {}, '✅ Em prática: '), comNome(s.texto)), el('div', { style: 'margin-top:6px' }, outra));
+    if (s.status !== 'sugerido') return caixa(el('div', { class: 'bia-sub' }, 'Última sugestão rejeitada.'), el('div', { style: 'margin-top:6px' }, outra));
+    if (cardEditando === c.id) return caixa(caixaEdicao(comNome(s.texto),
+      async (texto) => { cardEditando = null; await decidirSugestao(s.id, { texto }); carregarRelatorio(); carregarAprendizados(); },
+      () => { cardEditando = null; carregarRelatorio(); }));
+    return caixa(el('b', {}, '💡 Como resolver:'), el('div', { style: 'margin-top:4px;white-space:pre-wrap' }, comNome(s.texto)),
+      s.evidencia ? el('div', { class: 'bia-sub', style: 'margin-top:4px' }, '🔎 ' + s.evidencia) : null,
+      el('div', { class: 'bia-linha', style: 'margin-top:8px' },
+        el('button', { class: 'bia-bt pri mini', onclick: () => decidir({ ativo: true, status: 'ativo', escopo: 'todas' }) }, '✅ Aprovar para todas as lojas'),
+        el('button', { class: 'bia-bt mini', onclick: () => decidir({ ativo: true, status: 'ativo', escopo: 'loja' }) }, '📍 Aprovar só para a Ana'),
+        el('button', { class: 'bia-bt mini', onclick: () => { cardEditando = c.id; carregarRelatorio(); } }, '✏️ Editar'),
+        el('button', { class: 'bia-bt mini', onclick: () => decidir({ ativo: false, status: 'rejeitado' }) }, 'Rejeitar'),
+        outra));
+  }
+  // Analisa 100% das conversas do período (em lotes), mostrando o progresso, e atualiza o relatório.
+  async function analisarTudo(periodo, total) {
+    relAnalisando = true;
+    try {
+      for (let volta = 0; volta < 200; volta++) {
+        const a = await chamarServidor('analisar_periodo', { ...periodo, limite: 30 });
+        $('bia-rel-progresso').textContent = `🔎 Analisando as conversas do período: ${total - a.faltam} de ${total}…`;
+        if (!a.faltam || !a.feitas) break;
+      }
+      $('bia-rel-progresso').textContent = '';
+    } catch (e) { $('bia-rel-progresso').textContent = '⚠️ Parei a análise: ' + e.message; }
+    relAnalisando = false;
+    carregarRelatorio();
+  }
 
   async function carregarAnalise() {
     const { data, error } = await sb.from('bia_relatorios').select('*').order('criado_em', { ascending: false }).limit(1);
